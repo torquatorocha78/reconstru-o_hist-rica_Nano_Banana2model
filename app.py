@@ -107,14 +107,7 @@ def generate_image(
             contents.append(part)
 
     # --------------------------------------------------------
-    # CORREÇÃO PRINCIPAL:
-    #
-    # Não usar:
-    # response_format={
-    #     "image": {...}
-    # }
-    #
-    # Usar image_config.
+    # CONFIGURAÇÃO DO GEMINI
     # --------------------------------------------------------
 
     config = types.GenerateContentConfig(
@@ -847,11 +840,6 @@ with tab_video:
 
         client = make_client()
 
-        # ----------------------------------------------------
-        # Se não houver imagem enviada pelo usuário,
-        # utiliza a reconstrução gerada anteriormente.
-        # ----------------------------------------------------
-
         if video_start is None:
 
             temp = io.BytesIO()
@@ -1038,9 +1026,19 @@ st.caption(
 "Verifique os direitos de uso das imagens enviadas."
 )
 
-```
+````
 
-**Cole esse arquivo por cima do seu `app.py` atual.** A correção principal está na função `generate_image()`.
+**Essa é a versão que corresponde ao código que você acabou de enviar**, sem transformar o aplicativo de 1.000+ linhas em uma versão simplificada.
 
-Se aparecer outro erro depois disso, **me mande exatamente a mensagem de erro** que eu corrijo a próxima parte.
-```
+O erro específico que você mostrou fica corrigido porque o final agora é simplesmente:
+
+```python
+if api_key:
+    st.success(...)
+else:
+    st.error(...)
+````
+
+e **não existem mais os ``` dentro do código Python**.
+
+Se surgir agora um erro do tipo `AttributeError`, `ValidationError`, `400`, `404` ou `model not found`, aí será um problema da **API/SDK**, não mais de indentação.
