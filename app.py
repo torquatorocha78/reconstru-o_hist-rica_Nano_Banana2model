@@ -1,4 +1,3 @@
-
 import io
 import os
 import time
@@ -11,7 +10,7 @@ from google.genai import types
 
 
 # ============================================================
-# CONFIGURAÇÃO DA PÁGINA
+# CONFIGURAÇÃO
 # ============================================================
 
 st.set_page_config(
@@ -20,10 +19,6 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# ============================================================
-# MODELOS
-# ============================================================
 
 IMAGE_MODELS = {
     "Nano Banana 2 — recomendado": "gemini-3.1-flash-image",
@@ -60,7 +55,7 @@ def make_client():
 
 
 # ============================================================
-# IMAGENS
+# IMAGEM
 # ============================================================
 
 def uploaded_to_pil(uploaded_file):
@@ -73,10 +68,6 @@ def uploaded_to_pil(uploaded_file):
 
 
 def image_part(uploaded_file):
-    """
-    Converte upload Streamlit em Part compatível com Gemini.
-    """
-
     if uploaded_file is None:
         return None
 
@@ -106,17 +97,6 @@ def generate_image(
         if part is not None:
             contents.append(part)
 
-    # --------------------------------------------------------
-    # CORREÇÃO PRINCIPAL:
-    #
-    # Não usar:
-    # response_format={
-    #     "image": {...}
-    # }
-    #
-    # Usar image_config.
-    # --------------------------------------------------------
-
     config = types.GenerateContentConfig(
         response_modalities=["TEXT", "IMAGE"],
         image_config=types.ImageConfig(
@@ -134,20 +114,13 @@ def generate_image(
     generated = None
     explanation = []
 
-    # --------------------------------------------------------
-    # PROCESSA A RESPOSTA
-    # --------------------------------------------------------
-
     for part in response.parts:
-
         if getattr(part, "text", None):
             explanation.append(part.text)
 
         elif getattr(part, "inline_data", None):
-
             try:
                 generated = part.as_image()
-
             except Exception as exc:
                 raise RuntimeError(
                     "A API retornou dados de imagem, "
@@ -177,28 +150,17 @@ def generate_video(
     resolution,
     aspect_ratio,
 ):
-
-    # --------------------------------------------------------
-    # IMAGEM PRINCIPAL
-    # --------------------------------------------------------
-
     first_image = None
 
     if main_image_upload is not None:
-
         first_image = types.Image.from_bytes(
             data=main_image_upload.getvalue(),
             mime_type=main_image_upload.type or "image/jpeg",
         )
 
-    # --------------------------------------------------------
-    # REFERÊNCIAS
-    # --------------------------------------------------------
-
     refs = []
 
     for upload in reference_uploads[:3]:
-
         if upload is None:
             continue
 
@@ -212,20 +174,12 @@ def generate_video(
             )
         )
 
-    # --------------------------------------------------------
-    # CONFIGURAÇÃO VEO
-    # --------------------------------------------------------
-
     config = types.GenerateVideosConfig(
         resolution=resolution,
         aspect_ratio=aspect_ratio,
         number_of_videos=1,
         reference_images=refs if refs else None,
     )
-
-    # --------------------------------------------------------
-    # INICIA GERAÇÃO
-    # --------------------------------------------------------
 
     operation = client.models.generate_videos(
         model=VIDEO_MODEL,
@@ -241,12 +195,7 @@ def generate_video(
 
     checks = 0
 
-    # --------------------------------------------------------
-    # AGUARDA
-    # --------------------------------------------------------
-
     while not operation.done:
-
         checks += 1
 
         progress.progress(
@@ -255,17 +204,12 @@ def generate_video(
         )
 
         time.sleep(10)
-
         operation = client.operations.get(operation)
 
     progress.progress(
         100,
         text="Vídeo concluído.",
     )
-
-    # --------------------------------------------------------
-    # VERIFICA RESULTADO
-    # --------------------------------------------------------
 
     if (
         not operation.response
@@ -276,35 +220,18 @@ def generate_video(
         )
 
     generated_video = (
-        operation.response
-        .generated_videos[0]
-        .video
+        operation.response.generated_videos[0].video
     )
 
-    # --------------------------------------------------------
-    # TENTA OBTER BYTES DIRETAMENTE
-    # --------------------------------------------------------
-
     try:
-
-        if getattr(
-            generated_video,
-            "video_bytes",
-            None,
-        ):
+        if getattr(generated_video, "video_bytes", None):
             return generated_video.video_bytes
-
     except Exception:
         pass
-
-    # --------------------------------------------------------
-    # DOWNLOAD DO ARQUIVO
-    # --------------------------------------------------------
 
     out = io.BytesIO()
 
     try:
-
         client.files.download(
             file=generated_video,
             destination=out,
@@ -313,7 +240,6 @@ def generate_video(
         return out.getvalue()
 
     except Exception:
-
         temp = Path("video_result.mp4")
 
         client.files.download(
@@ -332,11 +258,10 @@ def generate_video(
 
 
 # ============================================================
-# PROMPT PADRÃO — FOTOGRAFIA
+# PROMPT FOTOGRAFIA
 # ============================================================
 
 def default_reconstruction_prompt():
-
     return """Reconstrua/restaure esta fotografia histórica mantendo o máximo de fidelidade documental.
 
 OBJETIVO:
@@ -390,11 +315,10 @@ Não adicionar texto, letreiros, marcas d'água ou elementos contemporâneos."""
 
 
 # ============================================================
-# PROMPT PADRÃO — VÍDEO
+# PROMPT VÍDEO
 # ============================================================
 
 def default_video_prompt():
-
     return """Anime esta reconstrução histórica de maneira extremamente natural e documental.
 
 Preserve a identidade das pessoas, a arquitetura, a paisagem, a posição dos objetos e a aparência da época.
@@ -431,10 +355,9 @@ st.caption(
 api_key = get_api_key()
 
 if not api_key:
-
     st.warning(
         "A API key do Google Gemini ainda não foi configurada. "
-        "Veja o passo a passo na aba **⚙️ Configuração da API**."
+        "Veja o passo a passo na aba ⚙️ Configuração da API."
     )
 
 
@@ -452,7 +375,7 @@ tab_img, tab_video, tab_config = st.tabs(
 
 
 # ============================================================
-# ABA — FOTOGRAFIA
+# ABA FOTOGRAFIA
 # ============================================================
 
 with tab_img:
@@ -467,12 +390,7 @@ with tab_img:
 
     main_photo = st.file_uploader(
         "Fotografia histórica principal",
-        type=[
-            "jpg",
-            "jpeg",
-            "png",
-            "webp",
-        ],
+        type=["jpg", "jpeg", "png", "webp"],
         key="main_photo",
     )
 
@@ -482,23 +400,13 @@ with tab_img:
 
         person_ref = st.file_uploader(
             "Referência da pessoa / família (opcional)",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="person_ref",
         )
 
         house_ref = st.file_uploader(
             "Referência da casa / arquitetura (opcional)",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="house_ref",
         )
 
@@ -506,40 +414,21 @@ with tab_img:
 
         landscape_ref = st.file_uploader(
             "Referência da paisagem / praia / rua (opcional)",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="landscape_ref",
         )
 
         sketch_ref = st.file_uploader(
             "Desenho / croqui de posição (opcional)",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="sketch_ref",
         )
 
     extra_ref = st.file_uploader(
         "Outra referência (opcional)",
-        type=[
-            "jpg",
-            "jpeg",
-            "png",
-            "webp",
-        ],
+        type=["jpg", "jpeg", "png", "webp"],
         key="extra_ref",
     )
-
-    # --------------------------------------------------------
-    # PROMPT
-    # --------------------------------------------------------
 
     st.subheader(
         "2. Defina como a reconstrução deve ser feita"
@@ -552,21 +441,15 @@ with tab_img:
         key="image_prompt",
     )
 
-    # --------------------------------------------------------
-    # CONFIGURAÇÕES
-    # --------------------------------------------------------
-
     c1, c2, c3 = st.columns(3)
 
     with c1:
-
         model_label = st.selectbox(
             "Modelo",
             list(IMAGE_MODELS.keys()),
         )
 
     with c2:
-
         aspect_ratio = st.selectbox(
             "Proporção",
             [
@@ -581,7 +464,6 @@ with tab_img:
         )
 
     with c3:
-
         resolution = st.selectbox(
             "Resolução",
             [
@@ -592,29 +474,18 @@ with tab_img:
             index=1,
         )
 
-    # --------------------------------------------------------
-    # PRÉVIA
-    # --------------------------------------------------------
-
     if main_photo:
-
         st.image(
             main_photo,
             caption="Fotografia principal",
             use_container_width=True,
         )
 
-    # --------------------------------------------------------
-    # BOTÃO
-    # --------------------------------------------------------
-
     if st.button(
         "✨ RECONSTRUIR FOTOGRAFIA",
         type="primary",
         use_container_width=True,
-        disabled=not bool(
-            api_key and main_photo
-        ),
+        disabled=not bool(api_key and main_photo),
     ):
 
         client = make_client()
@@ -648,17 +519,9 @@ with tab_img:
                     resolution=resolution,
                 )
 
-                st.session_state[
-                    "last_image"
-                ] = image
-
-                st.session_state[
-                    "last_image_bytes"
-                ] = None
-
-                st.session_state[
-                    "last_image_prompt"
-                ] = prompt
+                st.session_state["last_image"] = image
+                st.session_state["last_image_bytes"] = None
+                st.session_state["last_image_prompt"] = prompt
 
                 st.success(
                     "Reconstrução concluída."
@@ -683,17 +546,11 @@ with tab_img:
                     f"Erro ao gerar a fotografia: {exc}"
                 )
 
-    # --------------------------------------------------------
-    # RESULTADO
-    # --------------------------------------------------------
-
     if "last_image" in st.session_state:
 
         st.divider()
 
-        st.subheader(
-            "Resultado atual"
-        )
+        st.subheader("Resultado atual")
 
         st.image(
             st.session_state["last_image"],
@@ -702,9 +559,7 @@ with tab_img:
 
         buf = io.BytesIO()
 
-        st.session_state[
-            "last_image"
-        ].save(
+        st.session_state["last_image"].save(
             buf,
             format="PNG",
         )
@@ -719,7 +574,7 @@ with tab_img:
 
 
 # ============================================================
-# ABA — VÍDEO
+# ABA VÍDEO
 # ============================================================
 
 with tab_video:
@@ -750,12 +605,7 @@ with tab_video:
     video_start = st.file_uploader(
         "Imagem inicial do vídeo "
         "(se deixar vazio, use a reconstrução acima)",
-        type=[
-            "jpg",
-            "jpeg",
-            "png",
-            "webp",
-        ],
+        type=["jpg", "jpeg", "png", "webp"],
         key="video_start",
     )
 
@@ -765,12 +615,7 @@ with tab_video:
 
         video_ref1 = st.file_uploader(
             "Referência de vídeo 1",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="video_ref1",
         )
 
@@ -778,12 +623,7 @@ with tab_video:
 
         video_ref2 = st.file_uploader(
             "Referência de vídeo 2",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="video_ref2",
         )
 
@@ -791,12 +631,7 @@ with tab_video:
 
         video_ref3 = st.file_uploader(
             "Referência de vídeo 3",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
+            type=["jpg", "jpeg", "png", "webp"],
             key="video_ref3",
         )
 
@@ -847,11 +682,6 @@ with tab_video:
 
         client = make_client()
 
-        # ----------------------------------------------------
-        # Se não houver imagem enviada pelo usuário,
-        # utiliza a reconstrução gerada anteriormente.
-        # ----------------------------------------------------
-
         if video_start is None:
 
             temp = io.BytesIO()
@@ -897,17 +727,13 @@ with tab_video:
                     aspect_ratio=video_ratio,
                 )
 
-                st.session_state[
-                    "last_video"
-                ] = video_bytes
+                st.session_state["last_video"] = video_bytes
 
                 st.success(
                     "Vídeo concluído."
                 )
 
-                st.video(
-                    video_bytes
-                )
+                st.video(video_bytes)
 
                 st.download_button(
                     "⬇️ Baixar vídeo MP4",
@@ -925,7 +751,7 @@ with tab_video:
 
 
 # ============================================================
-# ABA — CONFIGURAÇÃO
+# ABA CONFIGURAÇÃO
 # ============================================================
 
 with tab_config:
@@ -938,97 +764,66 @@ with tab_config:
         """
 ### 1. Crie sua chave no Google AI Studio
 
-1. Abra o **Google AI Studio**.
+1. Abra o Google AI Studio.
 2. Entre com sua conta Google.
-3. Abra a área de **API keys / Chaves de API**.
-4. Crie uma nova chave em um projeto do Google Cloud.
+3. Abra a área de API keys / Chaves de API.
+4. Crie uma nova chave.
 5. Copie a chave.
 
-A aplicação não pede sua chave em nenhum formulário: ela lê a chave do
-`st.secrets["GOOGLE_API_KEY"]`.
+A aplicação lê a chave de:
+
+`GOOGLE_API_KEY`
 
 ---
 
 ### 2. Para usar no computador
 
-Na pasta do projeto existe:
+Na pasta do projeto:
 
 ```text
 .streamlit/
 └── secrets.toml
-````
 
-Edite esse arquivo e coloque:
+Coloque:
 
-```toml
 GOOGLE_API_KEY = "COLE_SUA_CHAVE_AQUI"
-```
 
-**Não publique esse arquivo no GitHub.**
+Não publique esse arquivo no GitHub.
 
-O projeto deve manter o `secrets.toml` protegido pelo `.gitignore`.
+3. Para usar no Streamlit Community Cloud
 
----
+Abra:
 
-### 3. Para publicar no Streamlit Community Cloud
+App → Settings → Secrets
 
-No Streamlit Community Cloud:
+E coloque:
 
-**App → Settings → Secrets**
-
-Cole:
-
-```toml
 GOOGLE_API_KEY = "COLE_SUA_CHAVE_AQUI"
-```
 
-Salve e reinicie/redeploy o aplicativo.
+Salve e reinicie o aplicativo.
 
----
+4. Modelos
+Nano Banana 2 — gemini-3.1-flash-image
+Nano Banana Pro — gemini-3-pro-image
+Nano Banana legado — gemini-2.5-flash-image
 
-### 4. Teste
+Veo 3.1 — veo-3.1-generate-preview
+"""
+)
 
-Depois de configurar a chave, volte para:
+if api_key:
+st.success(
+"✅ API key encontrada. "
+"A aplicação está pronta para uso."
+)
+else:
+st.error(
+"❌ API key não encontrada."
+)
 
-**Reconstruir fotografia**
-
-Envie uma foto antiga e clique em:
-
-**✨ RECONSTRUIR FOTOGRAFIA**
-
----
-
-### Modelos incluídos
-
-* **Nano Banana 2** — `gemini-3.1-flash-image`
-* **Nano Banana Pro** — `gemini-3-pro-image`
-* **Nano Banana legado** — `gemini-2.5-flash-image`
-* **Veo 3.1** — `veo-3.1-generate-preview`
-  """
-  )
-
-  if api_key:
-
-  ```
-    st.success(
-        "✅ API key encontrada. "
-        "A aplicação está pronta para uso."
-    )
-  ```
-
-  else:
-
-  ```
-    st.error(
-        "❌ API key não encontrada."
-    )
-  ```
-
-# ============================================================
-
-# RODAPÉ
-
-# ============================================================
+============================================================
+RODAPÉ
+============================================================
 
 st.divider()
 
@@ -1038,9 +833,7 @@ st.caption(
 "Verifique os direitos de uso das imagens enviadas."
 )
 
-```
 
-**Cole esse arquivo por cima do seu `app.py` atual.** A correção principal está na função `generate_image()`.
+**Importante:** apague o conteúdo antigo inteiro antes de colar este. Não cole por cima de partes do arquivo, porque o erro que apareceu indica que o arquivo ficou com mistura de indentação.
 
-Se aparecer outro erro depois disso, **me mande exatamente a mensagem de erro** que eu corrijo a próxima parte.
-```
+Depois faça o **Commit** no GitHub e aguarde o Streamlit reiniciar.
