@@ -65,18 +65,21 @@ def generate_image(client, prompt, uploads, model, aspect_ratio, resolution):
 
     config = types.GenerateContentConfig(
         response_modalities=["TEXT", "IMAGE"],
-        response_format={
-            "image": {
-                "aspect_ratio": aspect_ratio,
-                "image_size": resolution,
+        image_config= types.ImageConfig{"aspect_ratio": "16:9",
+                "image_size": "1k", "2K","4k",
             }
         },
     )
 
     response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
+    model="gemini-3.1-flash-image",
+    contents=contents,
+    config=types.GenerateContentConfig(
+        response_modalities=["IMAGE"],
+        image_config=types.ImageConfig(
+            aspect_ratio="16:9",
+            image_size="2K"
+        )
     )
 
     generated = None
