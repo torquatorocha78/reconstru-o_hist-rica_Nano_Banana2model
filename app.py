@@ -997,20 +997,20 @@ Envie uma foto antiga e clique em:
 
   if api_key:
 
-  ```
+  
     st.success(
         "✅ API key encontrada. "
         "A aplicação está pronta para uso."
     )
-  ```
+  
 
   else:
 
-  ```
+  
     st.error(
         "❌ API key não encontrada."
     )
-  ```
+  
 
 # ============================================================
 
@@ -1026,19 +1026,3 @@ st.caption(
 "Verifique os direitos de uso das imagens enviadas."
 )
 
-````
-
-**Essa é a versão que corresponde ao código que você acabou de enviar**, sem transformar o aplicativo de 1.000+ linhas em uma versão simplificada.
-
-O erro específico que você mostrou fica corrigido porque o final agora é simplesmente:
-
-```python
-if api_key:
-    st.success(...)
-else:
-    st.error(...)
-````
-
-e **não existem mais os ``` dentro do código Python**.
-
-Se surgir agora um erro do tipo `AttributeError`, `ValidationError`, `400`, `404` ou `model not found`, aí será um problema da **API/SDK**, não mais de indentação.
