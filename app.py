@@ -11,7 +11,7 @@ from google.genai import types
 
 
 # ============================================================
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO DA PÁGINA
 # ============================================================
 
 st.set_page_config(
@@ -20,6 +20,10 @@ st.set_page_config(
     layout="wide",
 )
 
+
+# ============================================================
+# MODELOS
+# ============================================================
 
 IMAGE_MODELS = {
     "Nano Banana 2 — recomendado": "gemini-3.1-flash-image",
@@ -56,10 +60,23 @@ def make_client():
 
 
 # ============================================================
-# IMAGEM
+# IMAGENS
 # ============================================================
 
+def uploaded_to_pil(uploaded_file):
+    if uploaded_file is None:
+        return None
+
+    return Image.open(
+        io.BytesIO(uploaded_file.getvalue())
+    ).convert("RGB")
+
+
 def image_part(uploaded_file):
+    """
+    Converte upload Streamlit em Part compatível com Gemini.
+    """
+
     if uploaded_file is None:
         return None
 
@@ -89,6 +106,17 @@ def generate_image(
         if part is not None:
             contents.append(part)
 
+    # --------------------------------------------------------
+    # CORREÇÃO PRINCIPAL:
+    #
+    # Não usar:
+    # response_format={
+    #     "image": {...}
+    # }
+    #
+    # Usar image_config.
+    # --------------------------------------------------------
+
     config = types.GenerateContentConfig(
         response_modalities=["TEXT", "IMAGE"],
         image_config=types.ImageConfig(
@@ -106,24 +134,39 @@ def generate_image(
     generated = None
     explanation = []
 
+    # --------------------------------------------------------
+    # PROCESSA A RESPOSTA
+    # --------------------------------------------------------
+
     for part in response.parts:
+
         if getattr(part, "text", None):
             explanation.append(part.text)
 
-        if getattr(part, "inline_data", None):
-            generated = part.as_image()
+        elif getattr(part, "inline_data", None):
+
+            try:
+                generated = part.as_image()
+
+            except Exception as exc:
+                raise RuntimeError(
+                    "A API retornou dados de imagem, "
+                    "mas o SDK não conseguiu convertê-los: "
+                    f"{exc}"
+                )
 
     if generated is None:
         raise RuntimeError(
             "A API respondeu, mas não retornou uma imagem. "
-            "Verifique o modelo e tente novamente."
+            "Tente reduzir o número de referências, "
+            "alterar o modelo ou reduzir a resolução."
         )
 
     return generated, "\n".join(explanation)
 
 
 # ============================================================
-# VÍDEO
+# GERAÇÃO DO VÍDEO
 # ============================================================
 
 def generate_video(
@@ -134,36 +177,55 @@ def generate_video(
     resolution,
     aspect_ratio,
 ):
+
+    # --------------------------------------------------------
+    # IMAGEM PRINCIPAL
+    # --------------------------------------------------------
+
     first_image = None
 
     if main_image_upload is not None:
+
         first_image = types.Image.from_bytes(
             data=main_image_upload.getvalue(),
             mime_type=main_image_upload.type or "image/jpeg",
         )
 
-    references = []
+    # --------------------------------------------------------
+    # REFERÊNCIAS
+    # --------------------------------------------------------
+
+    refs = []
 
     for upload in reference_uploads[:3]:
+
         if upload is None:
             continue
 
-        reference = types.VideoGenerationReferenceImage(
-            image=types.Image.from_bytes(
-                data=upload.getvalue(),
-                mime_type=upload.type or "image/jpeg",
-            ),
-            reference_type="asset",
+        refs.append(
+            types.VideoGenerationReferenceImage(
+                image=types.Image.from_bytes(
+                    data=upload.getvalue(),
+                    mime_type=upload.type or "image/jpeg",
+                ),
+                reference_type="asset",
+            )
         )
 
-        references.append(reference)
+    # --------------------------------------------------------
+    # CONFIGURAÇÃO VEO
+    # --------------------------------------------------------
 
     config = types.GenerateVideosConfig(
         resolution=resolution,
         aspect_ratio=aspect_ratio,
         number_of_videos=1,
-        reference_images=references if references else None,
+        reference_images=refs if refs else None,
     )
+
+    # --------------------------------------------------------
+    # INICIA GERAÇÃO
+    # --------------------------------------------------------
 
     operation = client.models.generate_videos(
         model=VIDEO_MODEL,
@@ -174,22 +236,22 @@ def generate_video(
 
     progress = st.progress(
         0,
-        text="Enviando o trabalho para o Veo...",
+        text="Enviando o trabalho para o Veo…",
     )
 
-    counter = 0
+    checks = 0
+
+    # --------------------------------------------------------
+    # AGUARDA
+    # --------------------------------------------------------
 
     while not operation.done:
-        counter += 1
 
-        percent = min(
-            95,
-            10 + counter * 5,
-        )
+        checks += 1
 
         progress.progress(
-            percent,
-            text="Gerando vídeo... aguarde.",
+            min(95, 10 + checks * 5),
+            text="Gerando vídeo… aguarde.",
         )
 
         time.sleep(10)
@@ -201,51 +263,68 @@ def generate_video(
         text="Vídeo concluído.",
     )
 
-    if not operation.response:
-        raise RuntimeError(
-            "O Veo não retornou uma resposta."
-        )
+    # --------------------------------------------------------
+    # VERIFICA RESULTADO
+    # --------------------------------------------------------
 
-    if not operation.response.generated_videos:
+    if (
+        not operation.response
+        or not operation.response.generated_videos
+    ):
         raise RuntimeError(
             "O Veo terminou sem retornar um vídeo."
         )
 
     generated_video = (
-        operation.response.generated_videos[0].video
+        operation.response
+        .generated_videos[0]
+        .video
     )
 
-    video_bytes = getattr(
-        generated_video,
-        "video_bytes",
-        None,
-    )
-
-    if video_bytes:
-        return video_bytes
-
-    output = io.BytesIO()
+    # --------------------------------------------------------
+    # TENTA OBTER BYTES DIRETAMENTE
+    # --------------------------------------------------------
 
     try:
-        client.files.download(
-            file=generated_video,
-            destination=output,
-        )
 
-        return output.getvalue()
+        if getattr(
+            generated_video,
+            "video_bytes",
+            None,
+        ):
+            return generated_video.video_bytes
 
     except Exception:
-        temp_file = Path("video_result.mp4")
+        pass
+
+    # --------------------------------------------------------
+    # DOWNLOAD DO ARQUIVO
+    # --------------------------------------------------------
+
+    out = io.BytesIO()
+
+    try:
 
         client.files.download(
             file=generated_video,
-            destination=str(temp_file),
+            destination=out,
         )
 
-        data = temp_file.read_bytes()
+        return out.getvalue()
+
+    except Exception:
+
+        temp = Path("video_result.mp4")
+
+        client.files.download(
+            file=generated_video,
+            destination=str(temp),
+        )
+
+        data = temp.read_bytes()
 
         try:
-            temp_file.unlink()
+            temp.unlink()
         except Exception:
             pass
 
@@ -253,113 +332,84 @@ def generate_video(
 
 
 # ============================================================
-# PROMPTS
+# PROMPT PADRÃO — FOTOGRAFIA
 # ============================================================
 
 def default_reconstruction_prompt():
-    return """
-Reconstrua e restaure esta fotografia histórica mantendo o máximo de
-fidelidade documental.
+
+    return """Reconstrua/restaure esta fotografia histórica mantendo o máximo de fidelidade documental.
+
+OBJETIVO:
+
+- preservar a identidade e aparência das pessoas da foto de referência;
+- preservar arquitetura, posição das construções, portas, janelas, cercas, postes, veículos, estrada e relevo;
+- recuperar detalhes perdidos por desbotamento, baixa resolução, manchas e ruído;
+- reconstruir apenas o que estiver plausivelmente indicado pelas fotografias e referências fornecidas;
+- não inventar uma arquitetura moderna ou substituir a construção histórica por outra;
+- manter a perspectiva e o enquadramento da fotografia principal;
+- aparência fotográfica histórica realista, não ilustração e não pintura.
+
+QUANDO HOUVER MAIS DE UMA REFERÊNCIA:
 
 A primeira imagem é a fotografia principal.
 
-As demais imagens são referências documentais.
+As demais são referências documentais.
 
-Preserve rigorosamente:
+Use as referências para resolver detalhes de pessoas, casa, paisagem, veículo e composição.
 
-- identidade das pessoas;
-- rostos;
-- roupas;
-- posição das pessoas;
-- arquitetura;
-- portas;
-- janelas;
-- telhado;
-- cercas;
-- postes;
-- veículos;
-- estrada;
-- vegetação;
-- praia;
-- montanhas;
-- relevo;
-- perspectiva;
-- enquadramento;
-- proporções dos elementos.
+Não copie elementos que contradigam a fotografia principal.
 
-Use as imagens de referência somente para recuperar detalhes que estejam
-perdidos ou pouco visíveis na fotografia principal.
+FIDELIDADE HISTÓRICA:
 
-Não substitua a arquitetura histórica.
+- não modernizar roupas;
+- não modernizar veículos;
+- não modernizar arquitetura;
+- não adicionar postes, fios, placas, prédios ou objetos contemporâneos;
+- preservar proporções;
+- preservar posição relativa dos elementos;
+- preservar características faciais;
+- preservar características arquitetônicas;
+- preservar o ambiente natural da época.
 
-Não modernize o cenário.
+RESTAURAÇÃO:
 
-Não adicione carros modernos.
+- remover manchas;
+- reduzir riscos;
+- recuperar contraste;
+- recuperar detalhes;
+- melhorar nitidez de forma natural;
+- corrigir desbotamento;
+- preservar textura fotográfica;
+- evitar aparência artificial de imagem gerada por IA.
 
-Não adicione prédios modernos.
+RESULTADO:
 
-Não adicione placas modernas.
+Uma fotografia historicamente plausível, natural, com textura fotográfica e iluminação coerente com a época.
 
-Não altere os rostos.
+Não adicionar texto, letreiros, marcas d'água ou elementos contemporâneos."""
 
-Não invente pessoas.
 
-Não invente construções.
-
-Remova riscos, manchas, sujeira e deterioração.
-
-Recupere contraste, nitidez e detalhes.
-
-Preserve a textura natural de uma fotografia histórica.
-
-O resultado deve parecer uma fotografia real restaurada, e não uma pintura,
-ilustração ou imagem artificial.
-
-Mantenha iluminação e perspectiva coerentes com a fotografia original.
-
-Não adicionar texto, letreiros ou marcas d'água.
-""".strip()
-
+# ============================================================
+# PROMPT PADRÃO — VÍDEO
+# ============================================================
 
 def default_video_prompt():
-    return """
-Anime esta fotografia histórica restaurada de maneira extremamente natural
-e documental.
 
-Preserve a identidade das pessoas.
+    return """Anime esta reconstrução histórica de maneira extremamente natural e documental.
 
-Preserve rostos, roupas, arquitetura, paisagem, veículos e objetos.
+Preserve a identidade das pessoas, a arquitetura, a paisagem, a posição dos objetos e a aparência da época.
 
-Faça apenas movimentos muito discretos e plausíveis.
+Movimento de câmera muito lento e discreto, como uma filmagem documental antiga.
 
-Movimento de câmera lento.
+Movimentos humanos mínimos e plausíveis.
 
-Pequeno movimento natural de pessoas.
-
-Pequeno movimento de vegetação quando apropriado.
-
-Não deformar rostos.
-
-Não deformar mãos.
-
-Não deformar roupas.
-
-Não modificar casas.
-
-Não modificar veículos.
+Nada de deformar rostos, mãos, roupas, casas ou veículos.
 
 Não modernizar o cenário.
 
-Não adicionar pessoas.
+Não inserir pessoas, prédios, carros, placas ou objetos que não estejam nas referências.
 
-Não adicionar prédios.
-
-Não adicionar carros.
-
-Não adicionar placas.
-
-O resultado deve parecer uma filmagem documental histórica restaurada.
-""".strip()
+A fotografia histórica restaurada deve ganhar vida com movimento realista e cinematográfico extremamente sutil."""
 
 
 # ============================================================
@@ -369,19 +419,30 @@ O resultado deve parecer uma filmagem documental histórica restaurada.
 st.title("📷 Reconstrução Histórica com IA")
 
 st.caption(
-    "Fotografias antigas → reconstrução/restauração → vídeo histórico"
+    "Fotografias antigas → reconstrução/restauração → "
+    "vídeo histórico com movimento"
 )
 
+
+# ============================================================
+# API KEY
+# ============================================================
 
 api_key = get_api_key()
 
 if not api_key:
+
     st.warning(
-        "A API key do Google Gemini ainda não foi configurada."
+        "A API key do Google Gemini ainda não foi configurada. "
+        "Veja o passo a passo na aba **⚙️ Configuração da API**."
     )
 
 
-tab_image, tab_video, tab_config = st.tabs(
+# ============================================================
+# ABAS
+# ============================================================
+
+tab_img, tab_video, tab_config = st.tabs(
     [
         "🖼️ Reconstruir fotografia",
         "🎬 Gerar vídeo",
@@ -391,15 +452,21 @@ tab_image, tab_video, tab_config = st.tabs(
 
 
 # ============================================================
-# ABA FOTOGRAFIA
+# ABA — FOTOGRAFIA
 # ============================================================
 
-with tab_image:
+with tab_img:
 
-    st.subheader("1. Fotografia principal")
+    st.subheader("1. Envie as referências")
+
+    st.write(
+        "Use a primeira imagem como fotografia principal. "
+        "As outras podem ser fotos da mesma casa, pessoa, "
+        "paisagem, veículo ou um desenho/esboço."
+    )
 
     main_photo = st.file_uploader(
-        "Envie a fotografia histórica",
+        "Fotografia histórica principal",
         type=[
             "jpg",
             "jpeg",
@@ -409,14 +476,12 @@ with tab_image:
         key="main_photo",
     )
 
-    st.subheader("2. Referências opcionais")
+    c1, c2 = st.columns(2)
 
-    col1, col2 = st.columns(2)
-
-    with col1:
+    with c1:
 
         person_ref = st.file_uploader(
-            "Pessoa / família",
+            "Referência da pessoa / família (opcional)",
             type=[
                 "jpg",
                 "jpeg",
@@ -427,7 +492,7 @@ with tab_image:
         )
 
         house_ref = st.file_uploader(
-            "Casa / arquitetura",
+            "Referência da casa / arquitetura (opcional)",
             type=[
                 "jpg",
                 "jpeg",
@@ -437,21 +502,10 @@ with tab_image:
             key="house_ref",
         )
 
-        sketch_ref = st.file_uploader(
-            "Croqui / desenho",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
-            key="sketch_ref",
-        )
-
-    with col2:
+    with c2:
 
         landscape_ref = st.file_uploader(
-            "Paisagem / rua / praia",
+            "Referência da paisagem / praia / rua (opcional)",
             type=[
                 "jpg",
                 "jpeg",
@@ -461,36 +515,57 @@ with tab_image:
             key="landscape_ref",
         )
 
-        extra_ref = st.file_uploader(
-            "Outra referência",
+        sketch_ref = st.file_uploader(
+            "Desenho / croqui de posição (opcional)",
             type=[
                 "jpg",
                 "jpeg",
                 "png",
                 "webp",
             ],
-            key="extra_ref",
+            key="sketch_ref",
         )
 
-    st.subheader("3. Prompt")
+    extra_ref = st.file_uploader(
+        "Outra referência (opcional)",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        key="extra_ref",
+    )
+
+    # --------------------------------------------------------
+    # PROMPT
+    # --------------------------------------------------------
+
+    st.subheader(
+        "2. Defina como a reconstrução deve ser feita"
+    )
 
     prompt = st.text_area(
-        "Instruções para a reconstrução",
+        "Prompt",
         value=default_reconstruction_prompt(),
-        height=400,
+        height=380,
         key="image_prompt",
     )
 
-    col1, col2, col3 = st.columns(3)
+    # --------------------------------------------------------
+    # CONFIGURAÇÕES
+    # --------------------------------------------------------
 
-    with col1:
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
 
         model_label = st.selectbox(
             "Modelo",
             list(IMAGE_MODELS.keys()),
         )
 
-    with col2:
+    with c2:
 
         aspect_ratio = st.selectbox(
             "Proporção",
@@ -505,7 +580,7 @@ with tab_image:
             index=0,
         )
 
-    with col3:
+    with c3:
 
         resolution = st.selectbox(
             "Resolução",
@@ -517,27 +592,34 @@ with tab_image:
             index=1,
         )
 
+    # --------------------------------------------------------
+    # PRÉVIA
+    # --------------------------------------------------------
+
     if main_photo:
+
         st.image(
             main_photo,
             caption="Fotografia principal",
             use_container_width=True,
         )
 
-    button_disabled = not (
-        api_key and main_photo
-    )
+    # --------------------------------------------------------
+    # BOTÃO
+    # --------------------------------------------------------
 
     if st.button(
         "✨ RECONSTRUIR FOTOGRAFIA",
         type="primary",
         use_container_width=True,
-        disabled=button_disabled,
+        disabled=not bool(
+            api_key and main_photo
+        ),
     ):
 
         client = make_client()
 
-        uploads = [
+        refs = [
             main_photo,
             person_ref,
             house_ref,
@@ -546,78 +628,90 @@ with tab_image:
             extra_ref,
         ]
 
-        uploads = [
-            item
-            for item in uploads
-            if item is not None
+        refs = [
+            x for x in refs
+            if x is not None
         ]
 
-        try:
+        with st.spinner(
+            "A IA está reconstruindo a fotografia…"
+        ):
 
-            with st.spinner(
-                "A IA está reconstruindo a fotografia..."
-            ):
+            try:
 
                 image, explanation = generate_image(
                     client=client,
                     prompt=prompt,
-                    uploads=uploads,
+                    uploads=refs,
                     model=IMAGE_MODELS[model_label],
                     aspect_ratio=aspect_ratio,
                     resolution=resolution,
                 )
 
-            st.session_state["last_image"] = image
-            st.session_state["last_image_prompt"] = prompt
+                st.session_state[
+                    "last_image"
+                ] = image
 
-            st.success(
-                "Reconstrução concluída."
-            )
+                st.session_state[
+                    "last_image_bytes"
+                ] = None
 
-            st.image(
-                image,
-                caption="Resultado",
-                use_container_width=True,
-            )
+                st.session_state[
+                    "last_image_prompt"
+                ] = prompt
 
-            if explanation:
+                st.success(
+                    "Reconstrução concluída."
+                )
 
-                with st.expander(
-                    "Observação do modelo"
-                ):
-                    st.write(explanation)
+                st.image(
+                    image,
+                    caption="Resultado",
+                    use_container_width=True,
+                )
 
-        except Exception as exc:
+                if explanation:
 
-            st.error(
-                f"Erro ao gerar a fotografia: {exc}"
-            )
+                    with st.expander(
+                        "Observação retornada pelo modelo"
+                    ):
+                        st.write(explanation)
+
+            except Exception as exc:
+
+                st.error(
+                    f"Erro ao gerar a fotografia: {exc}"
+                )
+
+    # --------------------------------------------------------
+    # RESULTADO
+    # --------------------------------------------------------
 
     if "last_image" in st.session_state:
 
         st.divider()
 
-        st.subheader("Resultado atual")
-
-        result_image = st.session_state[
-            "last_image"
-        ]
+        st.subheader(
+            "Resultado atual"
+        )
 
         st.image(
-            result_image,
+            st.session_state["last_image"],
             use_container_width=True,
         )
 
-        output = io.BytesIO()
+        buf = io.BytesIO()
 
-        result_image.save(
-            output,
+        st.session_state[
+            "last_image"
+        ].save(
+            buf,
             format="PNG",
         )
 
         st.download_button(
             "⬇️ Baixar fotografia reconstruída",
-            data=output.getvalue(),
+            data=buf.getvalue(),
             file_name="fotografia_reconstruida.png",
             mime="image/png",
             use_container_width=True,
@@ -625,22 +719,328 @@ with tab_image:
 
 
 # ============================================================
-# ABA VÍDEO
+# ABA — VÍDEO
 # ============================================================
 
 with tab_video:
 
     st.subheader(
-        "🎬 Transformar fotografia em vídeo"
+        "Transforme a fotografia em um pequeno filme histórico"
     )
 
-    generated_image = st.session_state.get(
+    st.info(
+        "O Veo 3.1 gera vídeos curtos. "
+        "Para uma reconstrução mais consistente, "
+        "use a imagem reconstruída como imagem principal "
+        "e até 3 referências."
+    )
+
+    generated_img = st.session_state.get(
         "last_image"
     )
 
-    if generated_image is not None:
+    if generated_img is not None:
 
         st.image(
-            generated_image,
-            caption="Reconstrução disponível",
+            generated_img,
+            caption="Fotografia reconstruída disponível",
+            width=500,
+        )
+
+    video_start = st.file_uploader(
+        "Imagem inicial do vídeo "
+        "(se deixar vazio, use a reconstrução acima)",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        key="video_start",
+    )
+
+    v1, v2, v3 = st.columns(3)
+
+    with v1:
+
+        video_ref1 = st.file_uploader(
+            "Referência de vídeo 1",
+            type=[
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+            ],
+            key="video_ref1",
+        )
+
+    with v2:
+
+        video_ref2 = st.file_uploader(
+            "Referência de vídeo 2",
+            type=[
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+            ],
+            key="video_ref2",
+        )
+
+    with v3:
+
+        video_ref3 = st.file_uploader(
+            "Referência de vídeo 3",
+            type=[
+                "jpg",
+                "jpeg",
+                "png",
+                "webp",
+            ],
+            key="video_ref3",
+        )
+
+    video_prompt = st.text_area(
+        "Prompt do vídeo",
+        value=default_video_prompt(),
+        height=300,
+        key="video_prompt",
+    )
+
+    vc1, vc2 = st.columns(2)
+
+    with vc1:
+
+        video_resolution = st.selectbox(
+            "Resolução do vídeo",
+            [
+                "720p",
+                "1080p",
+                "4k",
+            ],
+            index=0,
+        )
+
+    with vc2:
+
+        video_ratio = st.selectbox(
+            "Proporção do vídeo",
+            [
+                "16:9",
+                "9:16",
+            ],
+            index=0,
+        )
+
+    start_available = bool(
+        video_start or generated_img
+    )
+
+    if st.button(
+        "🎬 GERAR VÍDEO COM VEO 3.1",
+        type="primary",
+        use_container_width=True,
+        disabled=not bool(
+            api_key and start_available
+        ),
+    ):
+
+        client = make_client()
+
+        # ----------------------------------------------------
+        # Se não houver imagem enviada pelo usuário,
+        # utiliza a reconstrução gerada anteriormente.
+        # ----------------------------------------------------
+
+        if video_start is None:
+
+            temp = io.BytesIO()
+
+            generated_img.save(
+                temp,
+                format="PNG",
+            )
+
+            class MemoryUpload:
+
+                type = "image/png"
+
+                def getvalue(self):
+                    return temp.getvalue()
+
+            video_start = MemoryUpload()
+
+        refs = [
+            video_ref1,
+            video_ref2,
+            video_ref3,
+        ]
+
+        refs = [
+            x for x in refs
+            if x is not None
+        ]
+
+        with st.spinner(
+            "Gerando o vídeo no Veo 3.1. "
+            "Isso pode levar alguns minutos…"
+        ):
+
+            try:
+
+                video_bytes = generate_video(
+                    client=client,
+                    prompt=video_prompt,
+                    main_image_upload=video_start,
+                    reference_uploads=refs,
+                    resolution=video_resolution,
+                    aspect_ratio=video_ratio,
+                )
+
+                st.session_state[
+                    "last_video"
+                ] = video_bytes
+
+                st.success(
+                    "Vídeo concluído."
+                )
+
+                st.video(
+                    video_bytes
+                )
+
+                st.download_button(
+                    "⬇️ Baixar vídeo MP4",
+                    data=video_bytes,
+                    file_name="reconstrucao_historica.mp4",
+                    mime="video/mp4",
+                    use_container_width=True,
+                )
+
+            except Exception as exc:
+
+                st.error(
+                    f"Erro ao gerar o vídeo: {exc}"
+                )
+
+
+# ============================================================
+# ABA — CONFIGURAÇÃO
+# ============================================================
+
+with tab_config:
+
+    st.subheader(
+        "🔑 Como configurar a API do Google Gemini"
+    )
+
+    st.markdown(
+        """
+### 1. Crie sua chave no Google AI Studio
+
+1. Abra o **Google AI Studio**.
+2. Entre com sua conta Google.
+3. Abra a área de **API keys / Chaves de API**.
+4. Crie uma nova chave em um projeto do Google Cloud.
+5. Copie a chave.
+
+A aplicação não pede sua chave em nenhum formulário: ela lê a chave do
+`st.secrets["GOOGLE_API_KEY"]`.
+
+---
+
+### 2. Para usar no computador
+
+Na pasta do projeto existe:
+
+```text
+.streamlit/
+└── secrets.toml
+````
+
+Edite esse arquivo e coloque:
+
+```toml
+GOOGLE_API_KEY = "COLE_SUA_CHAVE_AQUI"
+```
+
+**Não publique esse arquivo no GitHub.**
+
+O projeto deve manter o `secrets.toml` protegido pelo `.gitignore`.
+
+---
+
+### 3. Para publicar no Streamlit Community Cloud
+
+No Streamlit Community Cloud:
+
+**App → Settings → Secrets**
+
+Cole:
+
+```toml
+GOOGLE_API_KEY = "COLE_SUA_CHAVE_AQUI"
+```
+
+Salve e reinicie/redeploy o aplicativo.
+
+---
+
+### 4. Teste
+
+Depois de configurar a chave, volte para:
+
+**Reconstruir fotografia**
+
+Envie uma foto antiga e clique em:
+
+**✨ RECONSTRUIR FOTOGRAFIA**
+
+---
+
+### Modelos incluídos
+
+* **Nano Banana 2** — `gemini-3.1-flash-image`
+* **Nano Banana Pro** — `gemini-3-pro-image`
+* **Nano Banana legado** — `gemini-2.5-flash-image`
+* **Veo 3.1** — `veo-3.1-generate-preview`
+  """
+  )
+
+  if api_key:
+
+  ```
+    st.success(
+        "✅ API key encontrada. "
+        "A aplicação está pronta para uso."
+    )
+  ```
+
+  else:
+
+  ```
+    st.error(
+        "❌ API key não encontrada."
+    )
+  ```
+
+# ============================================================
+
+# RODAPÉ
+
+# ============================================================
+
+st.divider()
+
+st.caption(
+"Aplicação preparada para restauração/reconstrução histórica "
+"com referências fotográficas. "
+"Verifique os direitos de uso das imagens enviadas."
+)
+
+```
+
+**Cole esse arquivo por cima do seu `app.py` atual.** A correção principal está na função `generate_image()`.
+
+Se aparecer outro erro depois disso, **me mande exatamente a mensagem de erro** que eu corrijo a próxima parte.
 ```
