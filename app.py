@@ -996,7 +996,7 @@ Envie uma foto antiga e clique em:
   )
 
   if api_key:
-      st.success(
+    st.success(
         "✅ API key encontrada. "
         "A aplicação está pronta para uso."
     )
