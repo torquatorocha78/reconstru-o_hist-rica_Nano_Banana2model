@@ -995,16 +995,15 @@ Envie uma foto antiga e clique em:
   """
   )
 
-  if api_key:
+if api_key:
     st.success(
         "✅ API key encontrada. "
         "A aplicação está pronta para uso."
     )
-  else:
+else:
     st.error(
         "❌ API key não encontrada."
     )
-  
 
 # ============================================================
 
