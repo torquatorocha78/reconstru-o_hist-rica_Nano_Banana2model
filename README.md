@@ -1,62 +1,33 @@
-# Reconstrução Histórica com IA — Streamlit
+# Reconstrução Histórica com IA — versão corrigida
 
-Aplicação para:
-- enviar uma fotografia histórica principal;
-- enviar referências de pessoa, casa, paisagem, croqui e outras imagens;
-- reconstruir/restaurar a cena com Nano Banana;
-- baixar a imagem reconstruída;
-- gerar um vídeo curto com Veo 3.1;
-- baixar o MP4.
+Aplicação Streamlit para reconstrução/restauração de fotografias históricas e geração de vídeos com Veo.
 
-## Instalação local
+## Correção aplicada
+
+Foi corrigido o bloco final de verificação da `GOOGLE_API_KEY` que estava com indentação inválida e causava:
+
+`IndentationError: unindent does not match any outer indentation level`
+
+O arquivo `app.py` foi validado com `python -m py_compile`.
+
+## Configuração
+
+1. Instale as dependências:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-No Windows:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Configure:
-
-```text
-.streamlit/secrets.toml
-```
-
-com:
+2. Crie `.streamlit/secrets.toml` a partir de `.streamlit/secrets.toml.example` e informe sua chave:
 
 ```toml
 GOOGLE_API_KEY = "SUA_CHAVE"
 ```
 
-Execute:
+3. Execute:
 
 ```bash
 streamlit run app.py
 ```
 
-## Streamlit Community Cloud
-
-Suba `app.py`, `requirements.txt`, `.gitignore` e demais arquivos para GitHub.
-Não publique `.streamlit/secrets.toml` com uma chave real.
-
-No Streamlit Community Cloud:
-App → Settings → Secrets
-
-Cole:
-
-```toml
-GOOGLE_API_KEY = "SUA_CHAVE"
-```
-
-## Observação
-
-O uso dos modelos Gemini/Veo depende da disponibilidade, limites e cobrança
-da conta Google/Gemini API.
+Nunca publique sua chave de API no GitHub.
